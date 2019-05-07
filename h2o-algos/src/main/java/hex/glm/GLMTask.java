@@ -690,8 +690,10 @@ public abstract class GLMTask  {
           double mu = _glmf.linkInv(es[i]);
           l += ws[i] * _glmf.likelihood(ys[i], mu);
           double var = _glmf.variance(mu);
-          if (var < 1e-6) var = 1e-6;
-          es[i] = ws[i] * (mu - ys[i]) / (var * _glmf.linkDeriv(mu));
+          if (var < 1e-6) var = 1e-6; // es is the gradient without the predictor term
+          es[i] = _glmf._family.equals(Family.tweedie)
+                  ?Math.pow(mu, _glmf._oneMinusVarPower)*(mu-ys[i])*_glmf._oneOLinkPower/es[i]
+                  :ws[i] * (mu - ys[i]) / (var * _glmf.linkDeriv(mu));
         }
       }
       _likelihood = l;
@@ -1591,7 +1593,7 @@ public abstract class GLMTask  {
       } else if(_beta != null) {
         _glmf.computeWeights(y, r.innerProduct(_beta) + _sparseOffset, r.offset, r.weight, _w);
         w = _w.w; // hessian without the xij xik part
-        wz = w*_w.z;
+        wz = _glmf._family.equals(Family.tweedie)?_w.z:w*_w.z;
         _likelihood += _w.l;
       } else {
         w = r.weight;

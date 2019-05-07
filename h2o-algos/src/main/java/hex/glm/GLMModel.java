@@ -539,6 +539,12 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
     final Link _link;
     final double _var_power;
     final double _link_power;
+    final double _oneOoneMinusVarPower;
+    final double _oneOtwoMinusVarPower;
+    final double _oneMinusVarPower;
+    final double _twoMinusVarPower;
+    final double _oneOLinkPower;
+    final double _oneOLinkPowerSquare;
     double _theta;  // used by negative binomial, 0 < _theta <= 1
     double _invTheta;
 
@@ -552,6 +558,12 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
       _link = link;
       _var_power = var_power;
       _link_power = link_power;
+      _oneMinusVarPower = 1-_var_power;
+      _twoMinusVarPower = 2-_var_power;
+      _oneOoneMinusVarPower = _var_power==1?1:1.0/(1-_var_power);
+      _oneOtwoMinusVarPower = _var_power==2?1:1.0/(2-_var_power);
+      _oneOLinkPower = 1.0/_link_power;
+      _oneOLinkPowerSquare = _oneOLinkPower*_oneOLinkPower;
       _theta = theta;
       _invTheta = 1/theta;
     }
@@ -666,7 +678,7 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
         case tweedie:
           return _link_power == 0
             ?Math.max(2e-16,Math.exp(x))
-            :Math.pow(x, 1/ _link_power);
+            :Math.pow(x, _oneOLinkPower);
         default:
           throw new RuntimeException("unexpected link function id  " + _link);
       }
@@ -715,10 +727,10 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
         case tweedie:
           double theta = _var_power == 1
             ?Math.log(y1/ym)
-            :(Math.pow(y1,1.-_var_power) - Math.pow(ym,1 - _var_power))/(1-_var_power);
+            :(Math.pow(y1,1.-_var_power) - Math.pow(ym,1 - _var_power))*_oneOoneMinusVarPower;
           double kappa = _var_power == 2
             ?Math.log(y1/ym)
-            :(Math.pow(yr,2-_var_power) - Math.pow(ym,2-_var_power))/(2 - _var_power);
+            :(Math.pow(yr,2-_var_power) - Math.pow(ym,2-_var_power))*_oneOtwoMinusVarPower;
           return 2 * (yr * theta - kappa);
         default:
           throw new RuntimeException("unknown family " + _family);
@@ -749,7 +761,7 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
         case gamma:
         case tweedie:
           x.dev = w*deviance(yr,ym);
-          x.l = x.dev; // todo: verify that this is not true for Poisson distribution
+          x.l = likelihood(w, yr, ym); // todo: verify that this is not true for Poisson distribution
           break;
         case negativebinomial:
           x.dev = w*deviance(yr,ym); // CHECKED-log/CHECKED-identity
@@ -785,8 +797,11 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
         case gamma:
           if (yr == 0) return -2;
           return -2 * (Math.log(yr / ym) - (yr - ym) / ym);
-        case tweedie:
-          return deviance(yr, ym); //fixme: not really correct, not sure what the likelihood is right now
+        case tweedie: // we ignore the a(y,phi,p) term in the likelihood calculation here since we are not optimizing over them
+          double temp = 0;
+          temp += _var_power==2?Math.log(ym):Math.pow(ym,_twoMinusVarPower)*_oneOtwoMinusVarPower;
+          temp -= yr*(_var_power==1?Math.log(ym):Math.pow(ym,_oneMinusVarPower)*_oneOoneMinusVarPower);
+          return temp; // ignored the a(y,phi,p) term as it is a constant for us
         default:
           throw new RuntimeException("unknown family " + _family);
       }
@@ -799,26 +814,33 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
       double var = variance(x.mu);//Math.max(1e-5, variance(x.mu)); // avoid numerical problems with 0 variance
       double d = linkDeriv(x.mu);
       if (_family.equals(Family.negativebinomial)) {
-        double invSum = 1.0/(1+_theta*x.mu);
+        double invSum = 1.0 / (1 + _theta * x.mu);
         double d2 = linkInvDeriv(x.mu);
-        if (y>0 && (x.mu>0)) {
-          double sumr = 1.0+_theta*y;
-          d = (y/(x.mu*x.mu)-_theta*sumr*invSum*invSum) * d2 * d2 + (sumr*invSum-y/x.mu) * linkInvDeriv2(x.mu); //CHECKED-log/CHECKED-identity
-          x.w = w*d;
-          x.z = eta + (y-x.mu) *invSum * d2/(d*x.mu); // CHECKED-identity
-        } else if (y==0 && x.mu > 0) {
-          d = linkInvDeriv2(x.mu)*invSum-_theta*invSum*invSum*d2*d2; // CHECKED
-          x.w = w*d;
-          x.z = eta - invSum*d2/d;
+        if (y > 0 && (x.mu > 0)) {
+          double sumr = 1.0 + _theta * y;
+          d = (y / (x.mu * x.mu) - _theta * sumr * invSum * invSum) * d2 * d2 + (sumr * invSum - y / x.mu) * linkInvDeriv2(x.mu); //CHECKED-log/CHECKED-identity
+          x.w = w * d;
+          x.z = eta + (y - x.mu) * invSum * d2 / (d * x.mu); // CHECKED-identity
+        } else if (y == 0 && x.mu > 0) {
+          d = linkInvDeriv2(x.mu) * invSum - _theta * invSum * invSum * d2 * d2; // CHECKED
+          x.w = w * d;
+          x.z = eta - invSum * d2 / d;
         } else {
           x.w = 0;
           x.z = 0;
         }
+      } else if (_family.equals(Family.tweedie)) {
+        double oneOetaSquare = 1.0/(eta*eta);
+        x.w = oneOetaSquare*_oneOLinkPower*(_twoMinusVarPower*Math.pow(x.mu,_twoMinusVarPower)
+                -y*_oneMinusVarPower*Math.pow(x.mu, _oneMinusVarPower)*_oneOLinkPower
+                -(y-x.mu)*Math.pow(x.mu, _oneMinusVarPower));
+        x.z = x.w*eta+x.mu*_oneOLinkPower/eta; // w*z and not just z
+        x.w *= w;
       } else {
         x.w = w / (var * d * d);  // formula did not quite work with negative binomial
         x.z = eta + (y - x.mu) * d;
       }
-      likelihoodAndDeviance(y,x,w);
+      likelihoodAndDeviance(y, x, w);
       return x;
     }
   }
