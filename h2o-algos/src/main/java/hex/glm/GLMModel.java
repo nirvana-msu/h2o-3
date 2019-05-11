@@ -28,6 +28,8 @@ import java.util.NoSuchElementException;
  */
 public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLMOutput> {
 
+  final static public double _EPS = 1e-6;
+  final static public double _OneOEPS = 1e6;
   public GLMModel(Key selfKey, GLMParameters parms, GLM job, double [] ymu, double ySigma, double lambda_max, long nobs) {
     super(selfKey, parms, job == null?new GLMOutput():new GLMOutput(job));
     // modelKey, parms, null, Double.NaN, Double.NaN, Double.NaN, -1
@@ -450,7 +452,7 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
         case logit:
 //        case multinomial:
           double div = (x * (1 - x));
-          if(div < 1e-6) return 1e6; // avoid numerical instability
+          if(div < _EPS) return _OneOEPS; // avoid numerical instability
           return 1.0 / div;
         case identity:
           return 1;
@@ -461,7 +463,7 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
         case ologlog:
           double oneMx = 1.0-x;
           double divsor = -1.0*oneMx*Math.log(oneMx);
-          return (divsor<1e-6)?1e6:(1.0/divsor);
+          return (divsor<_EPS)?_OneOEPS:(1.0/divsor);
         case tweedie:
 //          double res = _tweedie_link_power == 0
 //            ?Math.max(2e-16,Math.exp(x))
@@ -636,12 +638,12 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
         case logit:
 //        case multinomial:
           double div = (x * (1 - x));
-          if(div < 1e-6) return 1e6; // avoid numerical instability
+          if(div < _EPS) return _OneOEPS; // avoid numerical instability
           return 1.0 / div;
         case ologlog:
           double oneMx = 1.0-x;
           double divsor = -1.0*oneMx*Math.log(oneMx);
-          return (divsor<1e-6)?1e6:(1.0/divsor);
+          return (divsor<_EPS)?_OneOEPS:(1.0/divsor);
         case identity:
           return 1;
         case log:
@@ -690,7 +692,7 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
         case quasibinomial:
         case binomial:
           double res = mu * (1 - mu);
-          return res < 1e-6?1e-6:res;
+          return res < _EPS?_EPS:res;
         case poisson:
           return mu;
         case negativebinomial:
@@ -831,10 +833,19 @@ public class GLMModel extends Model<GLMModel,GLMModel.GLMParameters,GLMModel.GLM
         }
       } else if (_family.equals(Family.tweedie)) {
         double oneOetaSquare = 1.0/(eta*eta);
-        x.w = oneOetaSquare*_oneOLinkPower*(_twoMinusVarPower*Math.pow(x.mu,_twoMinusVarPower)
-                -y*_oneMinusVarPower*Math.pow(x.mu, _oneMinusVarPower)*_oneOLinkPower
-                -(y-x.mu)*Math.pow(x.mu, _oneMinusVarPower));
-        x.z = x.w*eta+x.mu*_oneOLinkPower/eta; // w*z and not just z
+        double oneOeta = eta==0?_OneOEPS:1.0/eta;
+        double oneOxmu = x.mu==0?_OneOEPS:1.0/x.mu;
+        double yOxmu = y*oneOxmu;
+        double yxmuOneMp = y*Math.pow(x.mu, 1-_var_power);
+        double xmuTwoMp = Math.pow(x.mu, 2-_var_power);
+        x.w = _var_power==1?(_link_power==0?x.mu:(y-(y-x.mu)*(_oneOLinkPower-1))*_oneOLinkPower*oneOetaSquare)
+                :(_var_power==2?(_link_power==0?yOxmu:(yOxmu+yOxmu*_oneOLinkPower-1)*_oneOLinkPower*oneOetaSquare)
+                :(_link_power==0?(_var_power*yxmuOneMp+_oneMinusVarPower*xmuTwoMp-(yxmuOneMp-xmuTwoMp)):
+                _oneOLinkPower*oneOetaSquare*((_var_power*yxmuOneMp+_oneMinusVarPower*xmuTwoMp)*_oneOLinkPower
+                        -(yxmuOneMp-xmuTwoMp)*(_oneOLinkPower-1))));
+        x.z = eta+(_var_power==1?(_link_power==0?(y-x.mu):(y-x.mu)*_oneOLinkPower*oneOeta):
+                (_var_power==2?(_link_power==0?(yOxmu-1):(yOxmu-1)*_oneOLinkPower*oneOeta):
+                        (_link_power==0?(yxmuOneMp-xmuTwoMp):(yxmuOneMp-xmuTwoMp)*_oneOLinkPower*oneOeta)))/x.w;
         x.w *= w;
       } else {
         x.w = w / (var * d * d);  // formula did not quite work with negative binomial
