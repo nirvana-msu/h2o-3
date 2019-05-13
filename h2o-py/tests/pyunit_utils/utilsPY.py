@@ -512,7 +512,7 @@ def pyunit_exec(test_name):
 
 def standalone_test(test):
     if not h2o.h2o.connection():
-        h2o.init(strict_version_check=False)
+        h2o.init(strict_version_check=False, ip="192.168.254.2")
 
     h2o.remove_all()
 

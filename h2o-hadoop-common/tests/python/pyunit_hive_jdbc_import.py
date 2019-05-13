@@ -19,7 +19,7 @@ def adapt_airlines(dataset, table_name="table_for_h2o_import"):
     return dataset
 
 def hive_jdbc_import():
-    connection_url = "jdbc:hive2://localhost:10000/default"
+    connection_url = "jdbc:hive2://192.168.254.2:10000/default"
     krb_enabled = os.getenv('KRB_ENABLED', 'false').lower() == 'true'
     use_token = os.getenv('KRB_USE_TOKEN', 'false').lower() == 'true'
     if krb_enabled:
